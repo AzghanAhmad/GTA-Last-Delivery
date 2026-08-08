@@ -1,16 +1,8 @@
+import type { MissionObjective } from "./MissionObjective";
+
 export type MissionPhase = "inactive" | "running" | "complete" | "failed";
 
-export interface MissionObjective {
-  /** Stable id used by listeners to react to specific objectives. */
-  id: string;
-  /** Player-facing task shown in the HUD and on the map. */
-  title: string;
-  /** World anchor for markers. */
-  x: number;
-  z: number;
-  /** Informational radius around the anchor; used for markers, not logic. */
-  radius: number;
-}
+export type { MissionObjective };
 
 /**
  * Generic mission orchestrator.

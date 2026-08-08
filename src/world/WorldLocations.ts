@@ -24,7 +24,7 @@ export interface WorldLocations {
   START: WorldLocation;
   /** Where the player's first drivable car is parked. */
   START_VEHICLE: WorldLocation;
-  /** Reserved spawn for the future Heist target vehicle. */
+  /** The Blackout Job target vehicle: parked inside the warehouse compound. */
   TARGET_VEHICLE: WorldLocation;
   POLICE_STATION: WorldLocation;
   CITY_CENTER: WorldLocation;
@@ -33,16 +33,25 @@ export interface WorldLocations {
   GAS_STATION: WorldLocation;
   /** A point on the main north-south corridor used as the escape route. */
   ESCAPE_ROUTE: WorldLocation;
+  /** Where the target car must be delivered (on the dock surface). */
+  DELIVERY_ZONE: WorldLocation;
+  /** On-foot getaway point near the delivery zone. */
+  EXTRACTION: WorldLocation;
 }
 
 export const WORLD_LOCATIONS: WorldLocations = {
   START: { x: PLAYER_SPAWN.x, z: PLAYER_SPAWN.z, yaw: PLAYER_SPAWN.yaw },
   START_VEHICLE: { x: STARTER_VEHICLE_SPAWN.x, z: STARTER_VEHICLE_SPAWN.z, yaw: STARTER_VEHICLE_SPAWN.yaw },
-  TARGET_VEHICLE: { x: 0, z: 235, yaw: Math.PI },
+  // Facing north so the driver heads straight out through the warehouse gate.
+  TARGET_VEHICLE: { x: -165, z: 205, yaw: Math.PI },
   POLICE_STATION: { x: 118, z: 40, yaw: 0 },
   CITY_CENTER: { x: 0, z: 35, yaw: 0 },
   WAREHOUSE: { x: -180, z: 215, yaw: 0 },
   DOCKS: { x: 195, z: 215, yaw: Math.PI / 2 },
   GAS_STATION: { x: -135, z: -35, yaw: 0 },
   ESCAPE_ROUTE: { x: 90, z: -150, yaw: 0 },
+  // On the dock surface, clear of containers/crates; extraction is a short
+  // walk east along the quay.
+  DELIVERY_ZONE: { x: 195, z: 262, yaw: 0 },
+  EXTRACTION: { x: 255, z: 272, yaw: 0 },
 };

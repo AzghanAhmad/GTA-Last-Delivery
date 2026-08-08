@@ -1,6 +1,8 @@
 import * as THREE from "three";
 import { InputManager } from "./InputManager";
 import { CameraManager } from "./CameraManager";
+import { AudioManager } from "./AudioManager";
+import { CinematicController, type CinematicKind } from "./CinematicController";
 import { Player, PlayerState } from "../player/Player";
 import { PlayerController } from "../player/PlayerController";
 import { Vehicle, SEDAN_CONFIG } from "../vehicles/Vehicle";
@@ -13,8 +15,9 @@ import { WantedSystem } from "../police/WantedSystem";
 import { PoliceManager } from "../police/PoliceManager";
 import { City } from "../world/City";
 import { WORLD_LOCATIONS } from "../world/WorldLocations";
-import { HeistMission } from "../missions/HeistMission";
-import type { MissionObjective, MissionPhase } from "../missions/MissionManager";
+import { HeistMission, HEIST_TIME_LIMIT } from "../missions/HeistMission";
+import { MissionState } from "../missions/MissionState";
+import type { MissionObjective } from "../missions/MissionManager";
 import { MissionMarker } from "../missions/MissionMarker";
 import { MissionHUD } from "../ui/MissionHUD";
 import { GraphicsSettings } from "./GraphicsSettings";
@@ -29,9 +32,11 @@ import { ControlsPanel } from "../ui/ControlsPanel";
  *
  * Owns the renderer, scene, camera, input and the render loop, and wires the
  * gameplay modules together. The full City is built at construction; the
- * player spawns at the START plaza with a test vehicle nearby. The wanted/
- * police loop is live (driven by the WantedSystem and PoliceManager) with
- * debug hotkeys F1-F3 to raise/lower the wanted level.
+ * player spawns at the START plaza with a starter car nearby and the Heist
+ * target parked in the warehouse compound. The single mission ("The Blackout
+ * Job") drives the state machine; Game reacts to its state changes to raise
+ * the wanted level, play short camera cuts (steal / deliver / complete),
+ * trigger audio and update the HUD, maps and objective markers.
  */
 export class Game {
   readonly renderer: THREE.WebGLRenderer;
@@ -42,11 +47,13 @@ export class Game {
   private readonly clock: THREE.Clock;
   private readonly input: InputManager;
   private readonly cameraManager: CameraManager;
+  private readonly audio: AudioManager;
+  private readonly cinematic: CinematicController;
   private readonly player: Player;
   private readonly playerController: PlayerController;
   private readonly vehicleManager: VehicleManager;
   private readonly vehicleController: VehicleController;
-  /** The Heist target car, parked in the south parking lot. */
+  /** The Heist target car, parked inside the warehouse compound. */
   private readonly targetVehicle: Vehicle;
   private readonly mission: HeistMission;
   private readonly missionMarker: MissionMarker;
@@ -140,7 +147,8 @@ export class Game {
     this.vehicleManager.register(testVehicle);
     this.vehicleController = new VehicleController(this.input, testVehicle);
 
-    // The Heist target: a fast prototype car parked in the south parking lot.
+    // The Heist target: a fast prototype car parked in the warehouse compound,
+    // headlights on so it reads as the mark in the dark district.
     this.targetVehicle = Vehicle.supercar();
     this.targetVehicle.setColliders(city.colliders);
     this.targetVehicle.group.position.set(
@@ -149,6 +157,7 @@ export class Game {
       WORLD_LOCATIONS.TARGET_VEHICLE.z,
     );
     this.targetVehicle.group.rotation.y = WORLD_LOCATIONS.TARGET_VEHICLE.yaw;
+    this.targetVehicle.setHeadlights(true);
     this.scene.add(this.targetVehicle.group);
     this.vehicleManager.register(this.targetVehicle);
 
@@ -185,13 +194,16 @@ export class Game {
     this.controlsPanel = new ControlsPanel(this.hudMount("controls-panel"));
     this.mapOverlay = new MapOverlay(this.hudMount("map-overlay"), this.worldMap);
 
-    // "The Heist" runs from the first frame: steal the target car, then deliver
-    // it to the docks. The beacon and objective line follow the active objective.
+    this.audio = new AudioManager();
+    this.cinematic = new CinematicController();
+
+    // "The Blackout Job" runs from the first frame; the beacon, HUD and map
+    // markers follow the state machine, and Game reacts to state changes.
     this.mission = new HeistMission();
     this.missionHUD = new MissionHUD(this.hudMount("mission-hud"));
     this.missionMarker = new MissionMarker(this.scene, 0xffd23e);
     this.mission.onObjectiveChange = (objective) => this.onMissionObjective(objective);
-    this.mission.onPhaseChange = (phase) => this.onMissionPhase(phase);
+    this.mission.onStateChange = (state) => this.onMissionState(state);
     this.mission.start();
 
     this.refreshPlayerColliders();
@@ -225,7 +237,10 @@ export class Game {
     this.input.onLockChange = (locked) => {
       overlay.classList.toggle("hidden", locked);
     };
-    overlay.addEventListener("click", () => this.input.requestPointerLock());
+    overlay.addEventListener("click", () => {
+      this.audio.unlock();
+      this.input.requestPointerLock();
+    });
   }
 
   private bindResize(): void {
@@ -254,10 +269,12 @@ export class Game {
 
   private loop(): void {
     this.animationId = requestAnimationFrame(() => this.loop());
-    const delta = Math.min(this.clock.getDelta(), 0.05);
+    const rawDelta = Math.min(this.clock.getDelta(), 0.05);
     this.handleMapKeys();
     if (!this.paused) {
-      this.update(delta);
+      // Cinematic cuts slow the world but the camera runs in real time.
+      const gameplayDelta = rawDelta * this.cinematic.timeScale;
+      this.update(gameplayDelta, rawDelta);
       this.city.environment.render(this.camera);
     } else {
       // True pause: freeze gameplay and the 3D render; keep the map actors live.
@@ -266,33 +283,37 @@ export class Game {
     this.input.endFrame();
   }
 
-  private update(delta: number): void {
+  private update(worldDelta: number, cameraDelta: number): void {
     const state = this.player.state;
     if (state === PlayerState.IN_VEHICLE) {
-      this.vehicleController.update(delta);
+      this.vehicleController.update(worldDelta);
       if (this.input.wasPressed("E")) {
-        this.vehicleManager.beginExit();
         const vehicle = this.vehicleManager.active;
+        if (vehicle) vehicle.setHeadlights(false);
+        this.vehicleManager.beginExit();
         if (vehicle) this.cameraManager.setMode("vehicle", vehicle.group);
       }
     } else if (state === PlayerState.ON_FOOT) {
-      this.playerController.update(delta);
+      this.playerController.update(worldDelta);
       if (this.input.wasPressed("E")) {
         const vehicle = this.vehicleManager.findEnterable();
         if (vehicle) {
           this.vehicleManager.beginEnter(vehicle);
+          vehicle.setHeadlights(true);
           this.cameraManager.setMode("vehicle", vehicle.group);
         }
       }
     }
 
-    this.vehicleManager.update(delta);
+    this.vehicleManager.update(worldDelta);
     if (this.vehicleManager.consumeExitCompleted()) {
       this.cameraManager.setMode("player");
       this.refreshPlayerColliders();
     }
 
-    this.updateMission(delta);
+    // Mission time runs in real seconds (not slow-motion) so the clock and the
+    // time bonus stay fair during cinematic cuts.
+    this.updateMission(cameraDelta);
 
     const inVehicleFlow = state !== PlayerState.ON_FOOT;
     const cameraTarget = inVehicleFlow
@@ -301,73 +322,141 @@ export class Game {
     // Hold the establishing shot until the player engages (or the intro elapses).
     if (this.input.locked) this.introTimer = 0;
     if (this.introTimer > 0) {
-      this.introTimer -= delta;
+      this.introTimer -= cameraDelta;
+    } else if (this.cinematic.active) {
+      this.updateCinematicCamera(cameraDelta);
     } else if (this.policeManager.arrestingOfficer || this.arrested) {
-      this.updateArrestCamera(delta);
+      this.updateArrestCamera(cameraDelta);
     } else if (cameraTarget) {
-      this.cameraManager.update(delta, cameraTarget);
+      this.cameraManager.update(worldDelta, cameraTarget);
     }
 
-    // Day/night cycle (L) and the post-bust restart (R).
+    // Day/night cycle (L) and the post-mission restart (R).
     this.city.environment.update(this.camera.position);
-    this.city.updateVisuals(this.camera.position, delta);
+    this.city.updateVisuals(this.camera.position, worldDelta);
     if (this.input.wasPressed("KeyL")) this.city.environment.toggleDayNight();
-    if (this.input.wasPressed("KeyR") && (this.arrested || this.missionComplete)) this.restart();
+    if (this.input.wasPressed("KeyR") && this.canRestart()) this.restart();
 
     this.handleDebugKeys();
 
-    this.wanted.update(delta, this.policeManager.isPlayerInPursuit);
-    this.policeManager.update(delta, this.player, this.vehicleManager, this.wanted);
+    this.wanted.update(worldDelta, this.policeManager.isPlayerInPursuit);
+    this.policeManager.update(worldDelta, this.player, this.vehicleManager, this.wanted);
+    this.audio.setSiren(this.wanted.isWanted());
     this.wantedDisplay.update();
     if (import.meta.env.DEV) {
-      this.debugOverlay.update({ frameTimeMs: delta * 1000 });
-      this.perfHUD.update(delta);
+      this.debugOverlay.update({ frameTimeMs: worldDelta * 1000 });
+      this.perfHUD.update(worldDelta);
     }
 
     this.updateHUD();
-    this.updatePrompt(delta);
+    this.updatePrompt(worldDelta);
   }
 
   /** Feeds the heist with current state, advances it, and animates the beacon. */
   private updateMission(delta: number): void {
     const active = this.vehicleManager.active;
+    const inVehicle = this.player.state === PlayerState.IN_VEHICLE;
+    const pos = inVehicle && active ? active.group.position : this.player.group.position;
     const inTarget = active === this.targetVehicle;
-    let docksDistance = Infinity;
-    if (active) {
-      const pos = active.group.position;
-      docksDistance = Math.hypot(pos.x - this.mission.docksX, pos.z - this.mission.docksZ);
+
+    let nearestPolice = Infinity;
+    for (const unit of this.policeManager.units) {
+      const dx = unit.vehicle.group.position.x - pos.x;
+      const dz = unit.vehicle.group.position.z - pos.z;
+      const distance = Math.hypot(dx, dz);
+      if (distance < nearestPolice) nearestPolice = distance;
     }
-    this.mission.setContext({ inTargetVehicle: inTarget, docksDistance });
+
+    this.mission.setContext({
+      playerX: pos.x,
+      playerZ: pos.z,
+      inTargetVehicle: inTarget,
+      target: {
+        x: this.targetVehicle.group.position.x,
+        z: this.targetVehicle.group.position.z,
+        speed: this.targetVehicle.speed,
+        damage: this.targetVehicle.damage,
+      },
+      nearestPoliceDistance: nearestPolice,
+      noPursuit: !this.wanted.isWanted(),
+    });
     this.mission.update(delta);
     this.missionMarker.update(delta);
   }
 
-  /** Repositions the beacon, updates the HUD and raises the wanted level on steal. */
-  private onMissionObjective(objective: MissionObjective | null): void {
-    if (!objective || this.mission.currentPhase !== "running") {
-      this.missionMarker.setVisible(false);
-      this.missionHUD.hideObjective();
-      return;
-    }
-    this.missionMarker.setVisible(true);
-    this.missionMarker.setPosition(objective.x, objective.z);
-    this.missionMarker.setColor(objective.id === "deliver" ? 0x5cf0c8 : 0xffd23e);
-    this.missionHUD.showObjective(objective.title);
-    if (objective.id === "deliver") {
-      this.wanted.setWantedLevel(this.mission.heistWantedLevel);
+  /** Reacts to mission state beats: banners, wanted level, audio and camera cuts. */
+  private onMissionState(state: MissionState): void {
+    switch (state) {
+      case MissionState.INTRO:
+        this.audio.cue("missionStart");
+        this.missionHUD.showBanner("THE BLACKOUT JOB", "Steal the Aurora GT and deliver it to the docks");
+        break;
+      case MissionState.STEAL_TARGET:
+        this.audio.cue("steal");
+        this.wanted.setWantedLevel(this.mission.heistWantedLevel);
+        this.missionHUD.showBanner("STEAL THE AURORA GT", "Get in and go");
+        this.playCinematic("steal");
+        break;
+      case MissionState.DELIVER_VEHICLE:
+        this.audio.cue("deliver");
+        this.wanted.clearWantedLevel();
+        this.missionHUD.showBanner("DELIVERY", "The Aurora GT is home");
+        this.playCinematic("deliver");
+        break;
+      case MissionState.MISSION_COMPLETE:
+        this.missionComplete = true;
+        this.wanted.clearWantedLevel();
+        this.policeManager.reset();
+        this.audio.cue("complete");
+        this.missionHUD.showBanner("PAYDAY", "", 2000);
+        this.showSuccess();
+        this.playCinematic("complete");
+        break;
+      case MissionState.MISSION_FAILED:
+        this.audio.cue("failed");
+        this.audio.setSiren(false);
+        this.missionHUD.showFailed(this.mission.failReason ?? "busted");
+        break;
+      default:
+        break;
     }
   }
 
-  /** On success, clears the heat and shows the win screen; on failure, the HUD. */
-  private onMissionPhase(phase: MissionPhase): void {
-    if (phase === "complete") {
-      this.missionComplete = true;
-      this.wanted.clearWantedLevel();
-      this.policeManager.reset();
-      this.showSuccess();
-    } else if (phase === "failed") {
-      this.missionHUD.showObjective("MISSION FAILED");
+  /** Repositions the beacon, updates the HUD and plays the objective chime. */
+  private onMissionObjective(objective: MissionObjective | null): void {
+    if (!objective || this.mission.currentPhase !== "running") {
+      this.missionMarker.setObjective(null);
+      this.missionHUD.hideObjective();
+      return;
     }
+    this.missionMarker.setObjective(objective);
+    this.missionHUD.showObjective(objective.title);
+    this.audio.cue("objective");
+  }
+
+  /** Starts a short camera cut following the relevant subject. */
+  private playCinematic(kind: CinematicKind): void {
+    const subject = kind === "complete" ? this.player.group : this.targetVehicle.group;
+    const follow = () => ({
+      x: subject.position.x,
+      z: subject.position.z,
+      yaw: subject.rotation.y,
+    });
+    const [duration, timeScale] =
+      kind === "steal" ? [1.6, 0.5] : kind === "deliver" ? [2.1, 0.4] : [1.8, 0.6];
+    const look = new THREE.Vector3(subject.position.x, 1.4, subject.position.z);
+    this.cinematic.play(kind, duration, timeScale, this.camera.position.clone(), look, follow);
+  }
+
+  private updateCinematicCamera(delta: number): void {
+    const pose = this.cinematic.update(delta);
+    if (pose) {
+      this.camera.position.copy(pose.position);
+      this.camera.lookAt(pose.lookAt);
+    }
+    // The cut just ended this frame (or never started); re-base the orbit so
+    // the normal camera resumes from the shot's final pose without a snap.
+    if (!this.cinematic.active) this.cameraManager.syncFromCamera();
   }
 
   /** M toggles the full map; ESC closes it. Works from inside pointer lock too. */
@@ -391,7 +480,7 @@ export class Game {
     if (document.pointerLockElement) document.exitPointerLock();
   }
 
-  /** Live HUD: controls hints for the current mode + the rotating minimap. */
+  /** Live HUD: controls hints, minimap, mission clock and the objective arrow. */
   private updateHUD(): void {
     const inVehicle = this.player.state === PlayerState.IN_VEHICLE;
     const active = this.vehicleManager.active;
@@ -403,6 +492,13 @@ export class Game {
       { x: pos.x, z: pos.z, yaw, color: inVehicle ? "#ffd97a" : "#9fd0ff", vehicle: inVehicle },
       this.collectMinimapExtras(inVehicle),
     );
+
+    const running = this.mission.currentPhase === "running";
+    this.missionHUD.setTimer(
+      running ? Math.max(0, HEIST_TIME_LIMIT - this.mission.elapsedSeconds) : null,
+    );
+    const objective = running ? this.mission.currentObjective : null;
+    this.missionHUD.updateArrow(objective ? { x: objective.x, z: objective.z } : null, this.camera);
   }
 
   /** Other things worth seeing on the minimap: your cars and any police units. */
@@ -419,14 +515,16 @@ export class Game {
         vehicle: true,
       });
     }
-    for (const unit of this.policeManager.units) {
-      actors.push({
-        x: unit.vehicle.group.position.x,
-        z: unit.vehicle.group.position.z,
-        yaw: unit.vehicle.yaw,
-        color: "#4f8cff",
-        vehicle: true,
-      });
+    if (this.wanted.isWanted()) {
+      for (const unit of this.policeManager.units) {
+        actors.push({
+          x: unit.vehicle.group.position.x,
+          z: unit.vehicle.group.position.z,
+          yaw: unit.vehicle.yaw,
+          color: "#4f8cff",
+          vehicle: true,
+        });
+      }
     }
     const objective = this.missionObjectiveActor();
     if (objective) actors.push(objective);
@@ -453,14 +551,16 @@ export class Game {
         vehicle: true,
       });
     }
-    for (const unit of this.policeManager.units) {
-      actors.push({
-        x: unit.vehicle.group.position.x,
-        z: unit.vehicle.group.position.z,
-        yaw: unit.vehicle.yaw,
-        color: "#4f8cff",
-        vehicle: true,
-      });
+    if (this.wanted.isWanted()) {
+      for (const unit of this.policeManager.units) {
+        actors.push({
+          x: unit.vehicle.group.position.x,
+          z: unit.vehicle.group.position.z,
+          yaw: unit.vehicle.yaw,
+          color: "#4f8cff",
+          vehicle: true,
+        });
+      }
     }
     const objective = this.missionObjectiveActor();
     if (objective) actors.push(objective);
@@ -472,12 +572,15 @@ export class Game {
     if (this.mission.currentPhase !== "running") return null;
     const objective = this.mission.currentObjective;
     if (!objective) return null;
+    const teal = objective.id === "docks" || objective.id === "deliverZone" || objective.id === "extraction";
     return {
       x: objective.x,
       z: objective.z,
       yaw: 0,
-      color: objective.id === "deliver" ? "#5cf0c8" : "#ffd23e",
+      color: teal ? "#5cf0c8" : "#ffd23e",
       vehicle: false,
+      objective: true,
+      radius: objective.ring,
     };
   }
 
@@ -505,11 +608,12 @@ export class Game {
   /** Officer reached the player: force-exit the vehicle and start the bust sequence. */
   private handleArrest(): void {
     if (this.arrested) return;
+    const vehicle = this.vehicleManager.active;
+    if (vehicle) vehicle.setHeadlights(false);
     this.vehicleManager.exit();
     this.arrested = true;
     this.wanted.clearWantedLevel();
-    this.mission.fail();
-    this.showBusted();
+    this.mission.fail("busted");
     this.refreshPlayerColliders();
   }
 
@@ -523,35 +627,32 @@ export class Game {
     this.camera.lookAt(target.x, target.y + 1.3, target.z);
   }
 
-  private showBusted(): void {
-    const overlay = this.container.querySelector("#busted-overlay");
-    if (overlay) overlay.classList.remove("hidden");
-  }
-
-  private hideBusted(): void {
-    const overlay = this.container.querySelector("#busted-overlay");
-    if (overlay) overlay.classList.add("hidden");
-  }
-
   private showSuccess(): void {
-    const overlay = this.container.querySelector("#success-overlay");
-    if (overlay) overlay.classList.remove("hidden");
+    const score = this.mission.getScore();
+    this.missionHUD.showSuccess(score, this.mission.elapsedSeconds, HEIST_TIME_LIMIT, this.targetVehicle.damage);
   }
 
-  private hideSuccess(): void {
-    const overlay = this.container.querySelector("#success-overlay");
-    if (overlay) overlay.classList.add("hidden");
+  /** True when the player may press R to restart (mission over, not during arrest-cam). */
+  private canRestart(): boolean {
+    if (this.arrested || this.missionComplete) return true;
+    if (this.cinematic.active) return false;
+    const phase = this.mission.currentPhase;
+    return phase === "failed" || phase === "complete";
   }
 
   /** Soft reset: back to the START plaza with a fresh establishing shot. */
   private restart(): void {
     this.arrested = false;
     this.missionComplete = false;
-    this.hideBusted();
-    this.hideSuccess();
+    this.cinematic.cancel();
+    this.audio.setSiren(false);
+    this.missionHUD.reset();
     this.wanted.clearWantedLevel();
     this.policeManager.reset();
     this.vehicleManager.reset();
+    this.vehicleManager.exit();
+    this.targetVehicle.resetDamage();
+    this.targetVehicle.setHeadlights(true);
     this.mission.reset();
     this.mission.start();
     this.player.setVisible(true);
@@ -568,7 +669,11 @@ export class Game {
   }
 
   private updatePrompt(delta: number): void {
-    if (this.arrested || this.missionComplete) {
+    if (this.arrested || this.missionComplete || this.mission.currentPhase === "failed") {
+      this.prompt.hide();
+      return;
+    }
+    if (this.cinematic.active) {
       this.prompt.hide();
       return;
     }
@@ -592,6 +697,8 @@ export class Game {
 
   dispose(): void {
     this.stop();
+    this.audio.dispose();
+    this.missionMarker.dispose();
     this.input.dispose();
     this.renderer.dispose();
     this.renderer.domElement.remove();

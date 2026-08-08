@@ -7,6 +7,10 @@ export interface MinimapActor {
   color: string;
   /** True when the actor is a vehicle (square instead of arrow). */
   vehicle: boolean;
+  /** When true, draw as a diamond (mission objective). */
+  objective?: boolean;
+  /** When set, draw a world-radius circle around the point (delivery zone). */
+  radius?: number;
 }
 
 /**
@@ -98,11 +102,11 @@ export class Minimap {
       if (dist > this.worldRadius) continue;
       const rx = -dx * cos + dz * sin;
       const ry = -dx * sin - dz * cos;
-      this.drawActorMarker(ctx, size / 2 + rx * pxPerMeter, size / 2 + ry * pxPerMeter, a.yaw - actor.yaw, a.color, a.vehicle, pxPerMeter);
+      this.drawActorMarker(ctx, size / 2 + rx * pxPerMeter, size / 2 + ry * pxPerMeter, a.yaw - actor.yaw, a.color, a.vehicle, pxPerMeter, a.objective ?? false, a.radius);
     }
 
     // Player arrow, always dead center and pointing "up".
-    this.drawActorMarker(ctx, size / 2, size / 2, 0, actor.color, actor.vehicle, pxPerMeter);
+    this.drawActorMarker(ctx, size / 2, size / 2, 0, actor.color, actor.vehicle, pxPerMeter, actor.objective ?? false, actor.radius);
     ctx.restore();
 
     // Rounded vignette rim.
@@ -121,15 +125,39 @@ export class Minimap {
     color: string,
     vehicle: boolean,
     pxPerMeter: number,
+    objective = false,
+    radius: number | null = null,
   ): void {
     const r = Math.max(3.5, pxPerMeter * 1.35);
     ctx.save();
     ctx.translate(x, y);
+    if (radius) {
+      const rr = Math.max(2, radius * pxPerMeter);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.5;
+      ctx.globalAlpha = 0.6;
+      ctx.beginPath();
+      ctx.arc(0, 0, rr, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.globalAlpha = 0.14;
+      ctx.fillStyle = color;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    }
     ctx.rotate(-yaw);
     ctx.fillStyle = color;
     ctx.strokeStyle = "rgba(12, 18, 28, 0.9)";
     ctx.lineWidth = 1.5;
-    if (vehicle) {
+    if (objective) {
+      ctx.beginPath();
+      ctx.moveTo(0, -r * 1.5);
+      ctx.lineTo(r * 1.5, 0);
+      ctx.lineTo(0, r * 1.5);
+      ctx.lineTo(-r * 1.5, 0);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    } else if (vehicle) {
       ctx.beginPath();
       ctx.rect(-r * 0.9, -r * 0.9, r * 1.8, r * 1.8);
       ctx.fill();

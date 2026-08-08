@@ -95,6 +95,10 @@ export class Vehicle {
   isOccupied = false;
   speed = 0;
 
+  /** 0..100 cosmetic damage accumulated from hard impacts; read by the mission. */
+  private damageValue = 0;
+  private headlightsOn = false;
+
   private static readonly doorOpenAngle = 0.95;
   private doorGroup: THREE.Group | null;
   private doorOpenAmount = 0;
@@ -152,6 +156,32 @@ export class Vehicle {
 
   get yaw(): number {
     return this.group.rotation.y;
+  }
+
+  get damage(): number {
+    return this.damageValue;
+  }
+
+  /** Clears accumulated damage (used by mission restart). */
+  resetDamage(): void {
+    this.damageValue = 0;
+  }
+
+  get areHeadlightsOn(): boolean {
+    return this.headlightsOn;
+  }
+
+  /** Turns the headlight glow on/off (bright beam when on, dim when off). */
+  setHeadlights(on: boolean): void {
+    this.headlightsOn = on;
+    const intensity = on ? 3.0 : 0.15;
+    for (const material of this.headlightMaterials) material.emissiveIntensity = intensity;
+  }
+
+  /** Adds impact damage, clamped to 100. Soft bumps below the threshold do nothing. */
+  private registerImpact(impactSpeed: number): void {
+    const amount = Math.max(0, impactSpeed - 5) * 2.2;
+    if (amount > 0) this.damageValue = Math.min(100, this.damageValue + amount);
   }
 
   /** Writes the horizontal world velocity vector into `out`. */
@@ -299,7 +329,10 @@ export class Vehicle {
       const normalX = bestAxis[0] * (towardVehicle >= 0 ? 1 : -1);
       const normalZ = bestAxis[1] * (towardVehicle >= 0 ? 1 : -1);
       const inward = this.speed * (sinY * normalX + cosY * normalZ);
-      if (inward < 0) this.speed = 0;
+      if (inward < 0) {
+        this.registerImpact(-inward);
+        this.speed = 0;
+      }
     }
   }
 }

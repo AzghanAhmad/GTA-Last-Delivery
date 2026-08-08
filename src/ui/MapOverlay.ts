@@ -6,6 +6,10 @@ export interface OverlayActor {
   yaw: number;
   color: string;
   vehicle: boolean;
+  /** When true, draw as a diamond (mission objective). */
+  objective?: boolean;
+  /** When set, draw a world-radius circle around the point (delivery zone). */
+  radius?: number;
 }
 
 interface MarkerHit {
@@ -142,7 +146,7 @@ export class MapOverlay {
     const size = this.fgCanvas.clientWidth;
     for (const actor of actors) {
       const p = this.projection.toPx(actor.x, actor.z);
-      this.drawActor(p.x, p.y, actor.yaw, actor.color, actor.vehicle);
+      this.drawActor(p.x, p.y, actor.yaw, actor.color, actor.vehicle, actor.objective ?? false, actor.radius);
     }
 
     if (this.hovered) {
@@ -167,16 +171,38 @@ export class MapOverlay {
     ctx.fill();
   }
 
-  private drawActor(px: number, py: number, yaw: number, color: string, vehicle: boolean): void {
+  private drawActor(px: number, py: number, yaw: number, color: string, vehicle: boolean, objective = false, radius: number | null = null): void {
     const ctx = this.fgCtx;
     const r = 10;
     ctx.save();
     ctx.translate(px, py);
+    if (radius) {
+      const rr = Math.max(3, radius * this.projection.pxPerMeter);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.5;
+      ctx.globalAlpha = 0.6;
+      ctx.beginPath();
+      ctx.arc(0, 0, rr, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.globalAlpha = 0.12;
+      ctx.fillStyle = color;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    }
     ctx.rotate(-yaw);
     ctx.fillStyle = color;
     ctx.strokeStyle = "rgba(10, 16, 26, 0.95)";
     ctx.lineWidth = 2;
-    if (vehicle) {
+    if (objective) {
+      ctx.beginPath();
+      ctx.moveTo(0, -r * 1.5);
+      ctx.lineTo(r * 1.5, 0);
+      ctx.lineTo(0, r * 1.5);
+      ctx.lineTo(-r * 1.5, 0);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    } else if (vehicle) {
       ctx.fillRect(-r * 0.9, -r * 0.9, r * 1.8, r * 1.8);
       ctx.strokeRect(-r * 0.9, -r * 0.9, r * 1.8, r * 1.8);
     } else {

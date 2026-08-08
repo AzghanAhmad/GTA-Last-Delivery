@@ -120,6 +120,11 @@ export class CameraManager {
     this.currentPosition.copy(this.camera.position);
   }
 
+  /** Re-bases the damped position on the camera's current spot (used after cinematic cuts). */
+  syncFromCamera(): void {
+    this.currentPosition.copy(this.camera.position);
+  }
+
   /**
    * Switches camera mode without snapping: the new mode's target angles are
    * initialized from the camera's current world yaw/pitch. `target` is the

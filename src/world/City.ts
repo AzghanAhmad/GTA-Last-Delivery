@@ -93,6 +93,7 @@ export class City {
 
     this.buildDistricts();
     this.buildBlocks();
+    this.buildWarehouseDressing();
     this.buildStartPlaza();
     this.props.fence(283, -283, 283, 143, 1.8);
     this.buildStreetLights();
@@ -220,7 +221,7 @@ export class City {
     this.fillBlock(BLOCKS.sw, {
       mix: ["apartment", "low", "office"],
       seed: 89,
-      exclusions: [{ minX: -245, maxX: -115, minZ: 165, maxZ: 265 }],
+      exclusions: [{ minX: -245, maxX: -103, minZ: 165, maxZ: 265 }],
     });
 
     this.buildParkingLot(
@@ -399,9 +400,37 @@ export class City {
     }
   }
 
+  /** Parked cars and amber warning beacons around the warehouse compound gate. */
+  private buildWarehouseDressing(): void {
+    const x = this.locations.WAREHOUSE.x;
+    const z = this.locations.WAREHOUSE.z;
+    // A few parked cars in the open corridor east of the compound; the corridor
+    // is ~120m wide, so they add dressing without blocking the escape route.
+    const carColors = [0x3a4a6a, 0x7a5a3a, 0x4a6a3a, 0x6a3a3a];
+    this.props.parkCar(x + 48, z - 30, Math.PI, carColors[0]);
+    this.props.parkCar(x + 54, z - 16, Math.PI, carColors[1]);
+    this.props.parkCar(x + 48, z + 34, Math.PI, carColors[2]);
+    this.props.parkCar(x + 56, z + 46, -Math.PI / 2, carColors[3]);
+    // Amber warning beacons flanking the compound's open east gate.
+    this.addWarningBeacon(x + 56, z - 44);
+    this.addWarningBeacon(x + 56, z + 42);
+  }
+
+  private addWarningBeacon(bx: number, bz: number): void {
+    const beaconMat = new THREE.MeshStandardMaterial({
+      color: 0x22262c,
+      emissive: 0xffa62b,
+      emissiveIntensity: 1.4,
+      roughness: 0.5,
+    });
+    beaconMat.userData.nightGlow = 1.4;
+    const pole = box(0.24, 6, 0.24, mat(0x2a3038, 0.6, 0.5), bx, 0, bz);
+    const head = box(0.55, 0.45, 0.55, beaconMat, bx, 6, bz);
+    this.scene.add(pole, head);
+  }
+
   /** Warm plaza lamp right beside the spawn so the very first frame is readable. */
-  private buildStartPlaza(): void {
-    const x = this.locations.START.x;
+  private buildStartPlaza(): void {    const x = this.locations.START.x;
     const z = this.locations.START.z;
     const lampMat = new THREE.MeshStandardMaterial({
       color: 0xffffff,
