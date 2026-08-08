@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Last Delivery</title>
+  </head>
+  <body>
+    <div id="app">
+      <div id="pointer-lock-overlay">
+        <div class="pl-title">LAST DELIVERY</div>
+        <div class="pl-controls">WASD Move &middot; Mouse Camera &middot; E Enter vehicle</div>
+        <div class="pl-click">Click to play</div>
+      </div>
+      <div id="interaction-prompt" class="hidden"></div>
+      <div id="wanted-display">
+        <span class="wanted-label">WANTED</span>
+        <span class="wanted-stars"></span>
+      </div>
+      <div id="debug-overlay" class="hidden"></div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

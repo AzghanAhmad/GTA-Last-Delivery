@@ -1,0 +1,21 @@
+{
+  "name": "last-delivery",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Last Delivery - a third-person open-world action browser game set in a rainy neon city at night.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/three": "^0.185.4",
+    "typescript": "^5.6.3",
+    "vite": "^6.0.7"
+  },
+  "dependencies": {
+    "three": "^0.172.0"
+  }
+}
