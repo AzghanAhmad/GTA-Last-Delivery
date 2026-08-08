@@ -18,7 +18,7 @@ export class VehicleController {
 
   update(delta: number): void {
     const throttle = (this.input.isDown("KeyW") ? 1 : 0) - (this.input.isDown("KeyS") ? 1 : 0);
-    const steer = (this.input.isDown("KeyD") ? 1 : 0) - (this.input.isDown("KeyA") ? 1 : 0);
+    const steer = (this.input.isDown("KeyA") ? 1 : 0) - (this.input.isDown("KeyD") ? 1 : 0);
     const handbrake = this.input.isDown("Space");
 
     // Drain Space edge presses while driving so they don't trigger a jump on return to foot.

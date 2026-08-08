@@ -4,9 +4,10 @@ A third-person open-world action browser game set in a small stylized neon
 city at night. Built with TypeScript, Three.js, and Vite, running directly in
 a modern desktop browser.
 
-> Development status: **foundation + core gameplay**. The engine bootstrap,
-> player controller, vehicle system and the police/wanted loop are in place.
-> The world, mission, HUD and atmosphere are still pending.
+> Development status: **foundation + core gameplay + visuals**. The engine
+> bootstrap, player controller, vehicle system, police/wanted loop and the
+> procedural night-city rendering (bloom, PBR materials, LOD) are in place.
+> The mission, HUD and remaining atmosphere are still pending.
 
 ## Description
 
@@ -27,7 +28,7 @@ police lights — built to run smoothly on modest hardware.
 - Git + GitHub (version control)
 - GitHub Pages (deployment)
 
-## Controls (planned)
+## Controls
 
 | Input | Action |
 | --- | --- |
@@ -38,12 +39,13 @@ police lights — built to run smoothly on modest hardware.
 | `E` | Enter / exit vehicle |
 | `W` | Accelerate |
 | `S` | Brake / reverse |
-| `Space` | Handbrake |
+| `L` | Toggle day / night |
+| `R` | Restart after being arrested |
 | `F1` / `F2` | Raise / lower wanted level (dev only) |
 | `F3` | Set wanted level to max (dev only) |
-| `F4` | Toggle debug overlay (dev only) |
-
-Final controls will be documented once the systems land.
+| `F4` | Toggle performance HUD (dev only) |
+| `F5` | Run a renderer/health test pass (dev only) |
+| `F6` | Toggle debug status overlay (dev only) |
 
 ## Core features (planned)
 
@@ -85,15 +87,27 @@ Current milestones — **Project foundation**, **Player controller**,
 - [x] Police & wanted system: wanted levels 0-3 with detection radius and
       gradual decay, police AI units that spawn per level, chase with
       intercept prediction, lose-and-search, return home, roof light bars,
-      arrest (in dev, raise/lower with `F1`/`F2`, max with `F3`; `F4`
-      toggles the debug overlay)
-- [ ] World / city
+      officer that leaves the cruiser and arrests the player (busted
+      sequence, restart with `R`); in dev, raise/lower with `F1`/`F2`,
+      max with `F3`; `F4` toggles the debug overlay
+- [x] World / city: nine blocks with districts (landmark tower, police
+      station, gas station, warehouse district, docks), procedural
+      buildings, neon signs, street lights, water, world-fixed night/day
+      sky (toggle with `L`), collision
+- [x] Graphics pipeline: ACES tone mapping + bloom post-FX (`F4` toggles,
+      `F5` runs a health test), PBR shared materials with procedural
+      canvas textures (`src/core/MaterialManager.ts`), detailed facades +
+      distance LOD (`BuildingManager`), textured roads/sidewalks/curbs +
+      instanced markings/manholes (`RoadSystem`), two lamp kinds with glow
+      halos (`StreetLight`), instanced street trees (`Vegetation`), animated
+      procedural water, camera wall-avoidance, and low/medium/high quality
+      tiers (`GraphicsSettings`) — see `docs/GRAPHICS_PIPELINE.md`
 - [ ] Mission "The Heist"
 - [ ] UI (HUD, minimap, etc.)
-- [ ] Atmosphere / effects
+- [ ] Atmosphere / effects (rain, particles, wet roads, headlights)
 
-Implemented so far: foundation, player controller, vehicle system, and
-police/wanted system.
+Implemented so far: foundation, player controller, vehicle system,
+police/wanted system, and the procedural night-city visuals.
 
 ## How to install
 

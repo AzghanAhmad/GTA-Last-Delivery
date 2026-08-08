@@ -38,18 +38,12 @@ export function emissiveBox(
   y: number,
   z: number,
 ): THREE.Mesh {
-  return box(
-    w,
-    h,
-    d,
-    new THREE.MeshStandardMaterial({
-      color: 0xffffff,
-      emissive: color,
-      emissiveIntensity: intensity,
-      roughness: 0.5,
-    }),
-    x,
-    y,
-    z,
-  );
+  const material = new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    emissive: color,
+    emissiveIntensity: intensity,
+    roughness: 0.5,
+  });
+  material.userData.nightGlow = intensity;
+  return box(w, h, d, material, x, y, z);
 }

@@ -4,6 +4,7 @@ import type { Vehicle } from "../vehicles/Vehicle";
 import type { VehicleManager } from "../vehicles/VehicleManager";
 import type { WantedSystem } from "./WantedSystem";
 import { Police, PoliceState, TrackedTarget } from "./Police";
+import type { PoliceOfficer } from "./PoliceOfficer";
 import { PoliceVehicle } from "./PoliceVehicle";
 
 export interface PoliceConfig {
@@ -67,9 +68,20 @@ export class PoliceManager {
   reset(): void {
     for (const unit of this.unitList) {
       this.scene.remove(unit.vehicle.group);
+      if (unit.officer) this.scene.remove(unit.officer.group);
     }
     this.unitList.length = 0;
     this.inPursuit = false;
+  }
+
+  /** The officer mid-standoff, if any unit is currently performing an arrest. */
+  get arrestingOfficer(): PoliceOfficer | null {
+    for (const unit of this.unitList) {
+      if (unit.state === PoliceState.ARRESTING && unit.officer?.isArresting) {
+        return unit.officer;
+      }
+    }
+    return null;
   }
 
   update(delta: number, player: Player, vehicleManager: VehicleManager, wanted: WantedSystem): void {
@@ -110,6 +122,7 @@ export class PoliceManager {
       const unit = this.unitList[i];
       if (unit.finished) {
         this.scene.remove(unit.vehicle.group);
+        if (unit.officer) this.scene.remove(unit.officer.group);
         this.unitList.splice(i, 1);
       }
     }
@@ -135,6 +148,7 @@ export class PoliceManager {
     this.scene.add(vehicle.group);
 
     const unit = new Police(
+      this.scene,
       vehicle,
       this.obstacleColliders,
       detectionRadius,

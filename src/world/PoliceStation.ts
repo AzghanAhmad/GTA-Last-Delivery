@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import type { WorldCollision } from "./WorldCollision";
-import type { BuildingSystem } from "./BuildingSystem";
+import type { BuildingManager } from "./BuildingManager";
 import type { PropFactory } from "./Props";
 import { mat, box, solid, emissiveBox } from "./BuildKit";
 import { NeonSign } from "./NeonSign";
@@ -15,7 +15,7 @@ export class PoliceStation {
   constructor(
     scene: THREE.Scene,
     collision: WorldCollision,
-    buildings: BuildingSystem,
+    buildings: BuildingManager,
     props: PropFactory,
     location: WorldLocation,
   ) {

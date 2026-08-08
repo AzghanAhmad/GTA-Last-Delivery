@@ -2,9 +2,11 @@ import * as THREE from "three";
 import { WorldCollision } from "./WorldCollision";
 import { Environment } from "./Environment";
 import { RoadSystem, type RoadLine } from "./RoadSystem";
-import { BuildingSystem, type BuildingType } from "./BuildingSystem";
+import { BuildingManager, type BuildingType } from "./BuildingManager";
 import { PropFactory } from "./Props";
 import { StreetLightManager } from "./StreetLight";
+import { Vegetation } from "./Vegetation";
+import { MaterialManager } from "../core/MaterialManager";
 import { Landmark } from "./Landmark";
 import { PoliceStation } from "./PoliceStation";
 import { GasStation } from "./GasStation";
@@ -14,8 +16,10 @@ import { DebugMarkers } from "./DebugMarkers";
 import { mat, box } from "./BuildKit";
 import { NeonSign } from "./NeonSign";
 import { WORLD_LOCATIONS, type WorldLocations } from "./WorldLocations";
+import { WORLD_HALF, VERTICAL_ROADS, HORIZONTAL_ROADS } from "./WorldMap";
+import { PLAYER_SPAWN } from "./SpawnConfig";
 
-export const WORLD_HALF = 297;
+export { WORLD_HALF };
 
 interface BlockBounds {
   minX: number;
@@ -23,19 +27,6 @@ interface BlockBounds {
   minZ: number;
   maxZ: number;
 }
-
-const VERTICAL_ROADS: RoadLine[] = [
-  { coordinate: -270, width: 26, from: -283, to: 283 },
-  { coordinate: -90, width: 26, from: -283, to: 283 },
-  { coordinate: 90, width: 26, from: -283, to: 283 },
-  { coordinate: 230, width: 22, from: -283, to: 143 },
-];
-
-const HORIZONTAL_ROADS: RoadLine[] = [
-  { coordinate: -270, width: 26, from: -283, to: 283 },
-  { coordinate: -70, width: 26, from: -283, to: 283 },
-  { coordinate: 130, width: 26, from: -283, to: 283 },
-];
 
 const BLOCKS: Record<string, BlockBounds> = {
   nw: { minX: -257, maxX: -103, minZ: -257, maxZ: -83 },
@@ -74,19 +65,27 @@ interface FillOptions {
  */
 export class City {
   readonly locations: WorldLocations = WORLD_LOCATIONS;
+  /** Sky/fog/lighting; the day-night toggle (L key) lives here. */
+  readonly environment: Environment;
   private readonly scene: THREE.Scene;
   private readonly collision = new WorldCollision();
   private readonly props: PropFactory;
-  private readonly buildings: BuildingSystem;
+  readonly buildings: BuildingManager;
   private readonly lights = new StreetLightManager();
+  private readonly vegetation: Vegetation;
+  readonly materials: MaterialManager;
+  private waterTexture: THREE.CanvasTexture | null = null;
+  private waterTime = 0;
 
-  constructor(scene: THREE.Scene) {
+  constructor(scene: THREE.Scene, renderer: THREE.WebGLRenderer) {
     this.scene = scene;
+    this.materials = new MaterialManager();
     this.props = new PropFactory(scene, this.collision);
-    this.buildings = new BuildingSystem(scene, this.collision);
+    this.buildings = new BuildingManager(scene, this.collision, this.materials);
+    this.vegetation = new Vegetation(scene, this.materials);
 
-    new Environment(scene);
-    const roads = new RoadSystem(scene);
+    this.environment = new Environment(scene, renderer);
+    const roads = new RoadSystem(scene, undefined, this.materials);
     roads.build(VERTICAL_ROADS, HORIZONTAL_ROADS, WORLD_HALF);
 
     this.buildWater();
@@ -97,6 +96,7 @@ export class City {
     this.buildStartPlaza();
     this.props.fence(283, -283, 283, 143, 1.8);
     this.buildStreetLights();
+    this.buildVegetation();
     this.buildTrafficSigns();
 
     if (import.meta.env.DEV) {
@@ -118,13 +118,19 @@ export class City {
   }
 
   private buildWater(): void {
+    const waterTexture = this.makeWaterTexture();
     const waterMat = new THREE.MeshStandardMaterial({
-      color: 0x0c1a2a,
-      metalness: 0.75,
-      roughness: 0.15,
-      emissive: 0x081423,
-      emissiveIntensity: 0.7,
+      color: 0x16283a,
+      metalness: 0.85,
+      roughness: 0.22,
+      map: waterTexture,
+      bumpMap: waterTexture,
+      bumpScale: 0.12,
+      emissive: 0x0a1a2c,
+      emissiveIntensity: 0.35,
     });
+    waterMat.userData.nightGlow = 0.35;
+    this.waterTexture = waterTexture;
 
     const south = new THREE.Mesh(new THREE.PlaneGeometry(WORLD_HALF * 2, 14), waterMat);
     south.rotation.x = -Math.PI / 2;
@@ -138,6 +144,44 @@ export class City {
 
     this.collision.addBox(-WORLD_HALF, 283, WORLD_HALF, WORLD_HALF + 10, 8);
     this.collision.addBox(283, -WORLD_HALF, WORLD_HALF + 10, 283, 8);
+  }
+
+  private makeWaterTexture(): THREE.CanvasTexture {
+    const canvas = document.createElement("canvas");
+    canvas.width = 256;
+    canvas.height = 256;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("Canvas 2D context unavailable for water");
+    ctx.fillStyle = "#16283a";
+    ctx.fillRect(0, 0, 256, 256);
+    const rand = mulberry32(90210);
+    for (let i = 0; i < 140; i++) {
+      ctx.strokeStyle = `rgba(70, 120, 160, ${0.08 + rand() * 0.2})`;
+      ctx.lineWidth = 1 + rand() * 2;
+      const x = rand() * 256;
+      const y = rand() * 256;
+      const len = 8 + rand() * 30;
+      const a = rand() * Math.PI;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + Math.cos(a) * len, y + Math.sin(a) * len);
+      ctx.stroke();
+    }
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.repeat.set(10, 10);
+    return texture;
+  }
+
+  /** Per-frame visual updates: building LOD and the slow water drift. */
+  updateVisuals(cameraPosition: THREE.Vector3, delta: number): void {
+    this.waterTime += delta;
+    if (this.waterTexture) {
+      this.waterTexture.offset.x = this.waterTime * 0.008;
+      this.waterTexture.offset.y = this.waterTime * 0.006;
+    }
+    this.buildings.updateLOD(cameraPosition);
   }
 
   private buildBlocks(): void {
@@ -167,7 +211,16 @@ export class City {
     this.fillBlock(BLOCKS.sc, {
       mix: ["office", "apartment"],
       seed: 71,
-      bounds: { minX: -77, maxX: 77, minZ: 143, maxZ: 224 },
+      exclusions: [{ minX: -45, maxX: 45, minZ: 218, maxZ: 262 }],
+    });
+
+    // The south-west quadrant used to be an empty void, so the view off the
+    // z=130 road looked like dark ground. Fill it (the warehouse district in
+    // sw keeps its exclusion; the docks district already fills all of se).
+    this.fillBlock(BLOCKS.sw, {
+      mix: ["apartment", "low", "office"],
+      seed: 89,
+      exclusions: [{ minX: -245, maxX: -115, minZ: 165, maxZ: 265 }],
     });
 
     this.buildParkingLot(
@@ -305,7 +358,7 @@ export class City {
       pad.maxZ - pad.minZ,
       mat(0x15191f, 0.7),
       (pad.minX + pad.maxX) / 2,
-      0.05,
+      -0.03,
       (pad.minZ + pad.maxZ) / 2,
     );
     this.scene.add(padMesh);
@@ -325,15 +378,19 @@ export class City {
     }
   }
 
-  /** A few parked cars along roads so streets feel lived in. */
+  /**
+   * A few parked cars along roads so streets feel lived in. Cars are aligned
+   * with their road: E-W roads face east/west (yaw +-PI/2), N-S roads face
+   * north/south (yaw 0/PI), never perpendicular to the lane.
+   */
   private streetParking(): void {
     const spots: Array<[number, number, number]> = [
-      [-30, -78, Math.PI],
-      [0, -78, Math.PI],
-      [30, -78, Math.PI],
-      [84, 66, -Math.PI / 2],
-      [-140, 124, 0],
-      [-168, 124, 0],
+      [-30, -78, Math.PI / 2],
+      [0, -78, Math.PI / 2],
+      [30, -78, -Math.PI / 2],
+      [84, 66, Math.PI],
+      [-140, 124, Math.PI / 2],
+      [-168, 124, -Math.PI / 2],
     ];
     const colors = [0x3a4a6a, 0x7a5a3a, 0x4a6a3a, 0x6a3a3a, 0x3a5a7a, 0x888888];
     for (let i = 0; i < spots.length; i++) {
@@ -342,6 +399,7 @@ export class City {
     }
   }
 
+  /** Warm plaza lamp right beside the spawn so the very first frame is readable. */
   private buildStartPlaza(): void {
     const x = this.locations.START.x;
     const z = this.locations.START.z;
@@ -351,10 +409,12 @@ export class City {
       emissiveIntensity: 2,
       roughness: 0.5,
     });
-    this.scene.add(box(0.18, 5.5, 0.18, mat(0x1b222e, 0.6, 0.5), x + 8, 0, z - 6));
-    this.scene.add(box(0.8, 0.35, 0.5, lampMat, x + 8, 5.5, z - 6));
-    const light = new THREE.PointLight(0xffd9a0, 55, 26, 2);
-    light.position.set(x + 8, 5.2, z - 6);
+    lampMat.userData.nightGlow = 2;
+    this.scene.add(box(0.18, 5.5, 0.18, mat(0x1b222e, 0.6, 0.5), x + 3.5, 0, z - 4));
+    this.scene.add(box(0.8, 0.35, 0.5, lampMat, x + 3.5, 5.5, z - 4));
+    const light = new THREE.PointLight(0xffd9a0, 55, 30, 2);
+    light.userData.nightLight = 55;
+    light.position.set(x + 3.5, 5.2, z - 4);
     this.scene.add(light);
   }
 
@@ -368,6 +428,7 @@ export class City {
           x: road.coordinate + side * (road.width * 0.5 + 2.0),
           z,
           yaw: side < 0 ? 0 : Math.PI,
+          kind: road.width >= 26 ? "orange" : "white",
           withLight: this.nearCenter(road.coordinate, z),
         });
       }
@@ -380,17 +441,54 @@ export class City {
           x,
           z: road.coordinate + side * (road.width * 0.5 + 2.0),
           yaw: side < 0 ? Math.PI / 2 : -Math.PI / 2,
+          kind: road.width >= 26 ? "orange" : "white",
           withLight: this.nearCenter(x, road.coordinate),
         });
       }
     }
-    this.lights.build(this.scene);
+    this.lights.build(this.scene, this.materials);
   }
 
+  private buildVegetation(): void {
+    const trees: Array<{ x: number; z: number; scale: number }> = [];
+    const bushes: Array<{ x: number; z: number; scale: number }> = [];
+
+    const rand = mulberry32(707);
+    const plant = (roads: readonly RoadLine[], verticalAxis: boolean): void => {
+      for (const road of roads) {
+        let side = 1;
+        for (let along = road.from + 24; along <= road.to - 24; along += 52) {
+          side = -side;
+          const offset = road.width * 0.5 + 2.6 + 0.5;
+          const x = verticalAxis ? road.coordinate + side * offset : along + (rand() - 0.5) * 4;
+          const z = verticalAxis ? along + (rand() - 0.5) * 4 : road.coordinate + side * offset;
+          const scale = 0.9 + rand() * 0.5;
+          if (rand() < 0.25) bushes.push({ x, z, scale: 1 });
+          else trees.push({ x, z, scale });
+        }
+      }
+    };
+    plant(VERTICAL_ROADS, true);
+    plant(HORIZONTAL_ROADS, false);
+
+    // A couple of trees framing the spawn, on the grass strip north of the
+    // sidewalk so they never block the walk to the starter car.
+    const start = this.locations.START;
+    trees.push({ x: start.x - 8, z: start.z - 2, scale: 1.05 });
+    trees.push({ x: start.x - 20, z: start.z - 2.5, scale: 0.95 });
+    bushes.push({ x: start.x - 14, z: start.z - 3, scale: 1 });
+    bushes.push({ x: start.x - 4, z: start.z - 3.2, scale: 1 });
+
+    this.vegetation.build({ trees, bushes });
+  }
+
+  /** Street lights carry lamps near the downtown district and around the spawn. */
   private nearCenter(x: number, z: number): boolean {
-    const dx = x - this.locations.CITY_CENTER.x;
-    const dz = z - this.locations.CITY_CENTER.z;
-    return dx * dx + dz * dz < 42 * 42;
+    const center = this.locations.CITY_CENTER;
+    const spawn = PLAYER_SPAWN;
+    const dCenter = (x - center.x) * (x - center.x) + (z - center.z) * (z - center.z);
+    const dSpawn = (x - spawn.x) * (x - spawn.x) + (z - spawn.z) * (z - spawn.z);
+    return dCenter < 70 * 70 || dSpawn < 90 * 90;
   }
 
   private buildTrafficSigns(): void {

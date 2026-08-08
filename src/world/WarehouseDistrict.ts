@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import type { WorldCollision } from "./WorldCollision";
-import type { BuildingSystem } from "./BuildingSystem";
+import type { BuildingManager } from "./BuildingManager";
 import type { PropFactory } from "./Props";
 import { mat, box, solid } from "./BuildKit";
 import { NeonSign } from "./NeonSign";
@@ -15,7 +15,7 @@ export class WarehouseDistrict {
   constructor(
     scene: THREE.Scene,
     collision: WorldCollision,
-    buildings: BuildingSystem,
+    buildings: BuildingManager,
     props: PropFactory,
     location: WorldLocation,
   ) {
@@ -75,6 +75,7 @@ export class WarehouseDistrict {
     ]);
 
     const floodMat = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xbfe8ff, emissiveIntensity: 1.8 });
+    floodMat.userData.nightGlow = 1.8;
     for (const [lx, lz] of [
       [x - 60, z + 8],
       [x + 60, z - 40],
@@ -86,6 +87,7 @@ export class WarehouseDistrict {
       scene.add(head);
     }
     const floodLight = new THREE.PointLight(0xbfe8ff, 40, 30, 2);
+    floodLight.userData.nightLight = 40;
     floodLight.position.set(x - 60, 8.5, z + 8);
     scene.add(floodLight);
 

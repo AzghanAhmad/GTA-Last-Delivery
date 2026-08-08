@@ -7,7 +7,12 @@
  *
  * Axis convention: +X is east, +Z is south, yaw = Math.atan2(dx, dz) so a yaw
  * of 0 faces +Z.
+ *
+ * START / START_VEHICLE mirror SpawnConfig, the single source of truth for
+ * where the player and the starter car begin.
  */
+import { PLAYER_SPAWN, STARTER_VEHICLE_SPAWN } from "./SpawnConfig";
+
 export interface WorldLocation {
   x: number;
   z: number;
@@ -31,8 +36,8 @@ export interface WorldLocations {
 }
 
 export const WORLD_LOCATIONS: WorldLocations = {
-  START: { x: 0, z: -210, yaw: Math.PI },
-  START_VEHICLE: { x: 55, z: -262, yaw: Math.PI / 2 },
+  START: { x: PLAYER_SPAWN.x, z: PLAYER_SPAWN.z, yaw: PLAYER_SPAWN.yaw },
+  START_VEHICLE: { x: STARTER_VEHICLE_SPAWN.x, z: STARTER_VEHICLE_SPAWN.z, yaw: STARTER_VEHICLE_SPAWN.yaw },
   TARGET_VEHICLE: { x: 0, z: 235, yaw: Math.PI },
   POLICE_STATION: { x: 118, z: 40, yaw: 0 },
   CITY_CENTER: { x: 0, z: 35, yaw: 0 },

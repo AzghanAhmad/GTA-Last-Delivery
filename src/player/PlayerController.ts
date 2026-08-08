@@ -26,7 +26,7 @@ export class PlayerController {
   }
 
   update(delta: number): void {
-    if (this.player.state === PlayerState.IN_VEHICLE) return;
+    if (this.player.state !== PlayerState.ON_FOOT) return;
 
     const axisX = (this.input.isDown("KeyD") ? 1 : 0) - (this.input.isDown("KeyA") ? 1 : 0);
     const axisZ = (this.input.isDown("KeyW") ? 1 : 0) - (this.input.isDown("KeyS") ? 1 : 0);
@@ -34,7 +34,7 @@ export class PlayerController {
     this.moveDirection.set(0, 0, 0);
     if (axisX !== 0 || axisZ !== 0) {
       this.camera.getForward(this.forward);
-      this.right.set(this.forward.z, 0, -this.forward.x);
+      this.right.set(-this.forward.z, 0, this.forward.x);
       this.moveDirection.addScaledVector(this.forward, axisZ).addScaledVector(this.right, axisX);
       this.moveDirection.normalize();
     }

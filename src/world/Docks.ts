@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import type { WorldCollision } from "./WorldCollision";
-import type { BuildingSystem } from "./BuildingSystem";
+import type { BuildingManager } from "./BuildingManager";
 import type { PropFactory } from "./Props";
 import { mat, box, solid, emissiveBox } from "./BuildKit";
 import { NeonSign } from "./NeonSign";
@@ -16,7 +16,7 @@ export class Docks {
   constructor(
     scene: THREE.Scene,
     collision: WorldCollision,
-    buildings: BuildingSystem,
+    buildings: BuildingManager,
     props: PropFactory,
     location: WorldLocation,
   ) {
@@ -38,7 +38,7 @@ export class Docks {
     solid(collision, x + 22, z - 46, 36, 18, 9);
     scene.add(box(36, 0.6, 18, roofMat, x + 22, 9, z - 46));
 
-    const dockSurface = box(180, 0.3, 42, mat(0x1a1f26, 0.8), x - 10, 0, z + 45);
+    const dockSurface = box(180, 0.3, 42, mat(0x1a1f26, 0.8), x - 10, -0.15, z + 45);
     scene.add(dockSurface);
 
     const quaySouth = box(180, 1.5, 1.2, concreteMat, x - 10, 0, z + 66.4);
@@ -81,6 +81,7 @@ export class Docks {
     this.buildCrane(scene, collision, x + 30, z - 70, Math.PI, steelMat);
 
     const lampMat = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xffe9bf, emissiveIntensity: 1.8 });
+    lampMat.userData.nightGlow = 1.8;
     for (const [lx, lz] of [
       [x - 76, z + 34],
       [x + 64, z + 34],
@@ -91,6 +92,7 @@ export class Docks {
       scene.add(box(1.6, 0.5, 0.7, lampMat, lx, 10, lz));
     }
     const pierLight = new THREE.PointLight(0xffe9bf, 50, 34, 2);
+    pierLight.userData.nightLight = 50;
     pierLight.position.set(x - 76, 9.5, z + 34);
     scene.add(pierLight);
 

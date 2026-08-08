@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { VehicleModel, SUPERCAR_CONFIG, SUPERCAR_STYLE, type VehicleModelResult } from "./VehicleModel";
 
 export interface VehicleInput {
   /** -1 (reverse) .. 0 (coast) .. 1 (accelerate). */
@@ -51,6 +52,8 @@ export interface VehicleParts {
   wheelSpinGroups: THREE.Group[];
   headlightMaterials: THREE.MeshStandardMaterial[];
   brakeLightMaterials: THREE.MeshStandardMaterial[];
+  /** Left-front door pivot that swings outward, or null when the model has none. */
+  driverDoorGroup: THREE.Group | null;
 }
 
 export interface VehicleStyle {
@@ -84,23 +87,67 @@ export class Vehicle {
   readonly wheelSpinGroups: THREE.Group[];
   readonly headlightMaterials: THREE.MeshStandardMaterial[];
   readonly brakeLightMaterials: THREE.MeshStandardMaterial[];
+  /** Where the seated driver's feet anchor; follows the car while driving. */
+  readonly driverSeatAnchor: THREE.Group;
+  /** Marker at the driver's door (outside), used for enter prompts and exits. */
+  readonly driverDoorAnchor: THREE.Group;
 
   isOccupied = false;
   speed = 0;
 
+  private static readonly doorOpenAngle = 0.95;
+  private doorGroup: THREE.Group | null;
+  private doorOpenAmount = 0;
+  private doorTarget = 0;
   private steerAngle = 0;
   private wheelSpin = 0;
   private readonly colliders: THREE.Box3[] = [];
 
-  constructor(config: VehicleConfig = SEDAN_CONFIG, style: VehicleStyle = defaultVehicleStyle) {
+  constructor(
+    config: VehicleConfig = SEDAN_CONFIG,
+    style: VehicleStyle = defaultVehicleStyle,
+    parts: VehicleModelResult = VehicleModel.buildPlaceholder(config, style),
+  ) {
     this.config = config;
     this.group = new THREE.Group();
-    const parts = buildVehicleModel(config, style);
     this.frontSteerGroups = parts.frontSteerGroups;
     this.wheelSpinGroups = parts.wheelSpinGroups;
     this.headlightMaterials = parts.headlightMaterials;
     this.brakeLightMaterials = parts.brakeLightMaterials;
+    this.doorGroup = parts.driverDoorGroup;
     this.group.add(...parts.meshes);
+
+    // Driver on the left (-X), seat just below beltline height so the seated
+    // rig's head clears the roof; door anchor hangs off the door side.
+    this.driverSeatAnchor = new THREE.Group();
+    this.driverSeatAnchor.position.set(-config.width * 0.3, 0.42, 0.15);
+    this.driverDoorAnchor = new THREE.Group();
+    this.driverDoorAnchor.position.set(-config.width * 0.5, 0.85, 0.7);
+    this.group.add(this.driverSeatAnchor, this.driverDoorAnchor);
+  }
+
+  get driverDoorGroup(): THREE.Group | null {
+    return this.doorGroup;
+  }
+
+  /** The Heist's target vehicle: a fast prototype car with a distinct identity. */
+  static supercar(): Vehicle {
+    return new Vehicle(SUPERCAR_CONFIG, SUPERCAR_STYLE, VehicleModel.buildSupercar());
+  }
+
+  /** Swaps the procedural visual for a GLB vehicle mapped onto the same handles. */
+  adoptGltf(gltf: import("three/examples/jsm/loaders/GLTFLoader.js").GLTF, nodeMap = {}): void {
+    for (const child of [...this.group.children]) {
+      if (child === this.driverSeatAnchor || child === this.driverDoorAnchor) continue;
+      this.group.remove(child);
+    }
+    this.group.add(gltf.scene.clone(true));
+    const handles = VehicleModel.adoptGltf(gltf, nodeMap);
+    this.frontSteerGroups.splice(0, this.frontSteerGroups.length, ...handles.frontSteerGroups);
+    this.wheelSpinGroups.splice(0, this.wheelSpinGroups.length, ...handles.wheelSpinGroups);
+    this.headlightMaterials.splice(0, this.headlightMaterials.length, ...handles.headlightMaterials);
+    this.brakeLightMaterials.splice(0, this.brakeLightMaterials.length, ...handles.brakeLightMaterials);
+    this.doorGroup = handles.driverDoorGroup;
   }
 
   get yaw(): number {
@@ -117,6 +164,34 @@ export class Vehicle {
   setColliders(colliders: readonly THREE.Box3[]): void {
     this.colliders.length = 0;
     this.colliders.push(...colliders);
+  }
+
+  /** Requests the driver door to open (true) or close (false); animates smoothly. */
+  setDoorOpen(open: boolean): void {
+    this.doorTarget = open ? 1 : 0;
+  }
+
+  /** Advances the door swing toward its target; call every frame while animating. */
+  updateDoor(delta: number): void {
+    if (!this.doorGroup) {
+      this.doorOpenAmount = this.doorTarget;
+      return;
+    }
+    const t = 1 - Math.exp(-9 * delta);
+    this.doorOpenAmount += (this.doorTarget - this.doorOpenAmount) * t;
+    this.doorGroup.rotation.y = this.doorOpenAmount * Vehicle.doorOpenAngle;
+  }
+
+  /** Writes the driver door marker's world position into `out`. */
+  getDriverDoorWorld(out: THREE.Vector3): THREE.Vector3 {
+    this.group.updateMatrixWorld(true);
+    return this.driverDoorAnchor.getWorldPosition(out);
+  }
+
+  /** Writes the driver seat anchor's world position into `out`. */
+  getDriverSeatWorld(out: THREE.Vector3): THREE.Vector3 {
+    this.group.updateMatrixWorld(true);
+    return this.driverSeatAnchor.getWorldPosition(out);
   }
 
   update(delta: number, input: VehicleInput): void {
@@ -227,107 +302,6 @@ export class Vehicle {
       if (inward < 0) this.speed = 0;
     }
   }
-}
-
-function buildVehicleModel(config: VehicleConfig, style: VehicleStyle): VehicleParts & { meshes: THREE.Object3D[] } {
-  const bodyMaterial = new THREE.MeshStandardMaterial({
-    color: style.bodyColor,
-    metalness: 0.4,
-    roughness: 0.35,
-  });
-  const glassMaterial = new THREE.MeshStandardMaterial({
-    color: style.glassColor,
-    metalness: 0.8,
-    roughness: 0.1,
-  });
-  const wheelMaterial = new THREE.MeshStandardMaterial({
-    color: style.wheelColor,
-    roughness: 0.9,
-  });
-  const headlightMaterial = new THREE.MeshStandardMaterial({
-    color: 0xffffff,
-    emissive: 0xbfefff,
-    emissiveIntensity: 1.5,
-  });
-  const brakeLightMaterial = new THREE.MeshStandardMaterial({
-    color: 0xffffff,
-    emissive: 0xff2222,
-    emissiveIntensity: 0.8,
-  });
-
-  const halfW = config.width * 0.5;
-  const halfL = config.length * 0.5;
-  const meshes: THREE.Object3D[] = [];
-
-  const chassis = new THREE.Mesh(new THREE.BoxGeometry(config.width, 0.5, config.length), bodyMaterial);
-  chassis.position.y = 0.7;
-  meshes.push(chassis);
-
-  const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.5, 2.1), glassMaterial);
-  cabin.position.set(0, 1.12, -0.15);
-  meshes.push(cabin);
-
-  const windshield = new THREE.Mesh(new THREE.BoxGeometry(1.64, 0.42, 0.04), glassMaterial);
-  windshield.position.set(0, 1.18, 0.84);
-  meshes.push(windshield);
-
-  const rearWindow = new THREE.Mesh(new THREE.BoxGeometry(1.64, 0.4, 0.04), glassMaterial);
-  rearWindow.position.set(0, 1.16, -1.12);
-  meshes.push(rearWindow);
-
-  for (const sideX of [-halfW + 0.08, halfW - 0.08]) {
-    const sideWindow = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.42, 1.9), glassMaterial);
-    sideWindow.position.set(sideX, 1.16, -0.15);
-    meshes.push(sideWindow);
-  }
-
-  for (const lightX of [-0.55, 0.55]) {
-    const headlight = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.12, 0.05), headlightMaterial);
-    headlight.position.set(lightX, 0.72, halfL - 0.02);
-    meshes.push(headlight);
-    const taillight = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.14, 0.05), brakeLightMaterial);
-    taillight.position.set(lightX, 0.8, -halfL + 0.02);
-    meshes.push(taillight);
-  }
-
-  const frontSteerGroups: THREE.Group[] = [];
-  const wheelSpinGroups: THREE.Group[] = [];
-
-  for (const [x, z, isFront] of [
-    [-halfW + 0.25, halfL - 0.55, true],
-    [halfW - 0.25, halfL - 0.55, true],
-    [-halfW + 0.25, -halfL + 0.55, false],
-    [halfW - 0.25, -halfL + 0.55, false],
-  ] as Array<[number, number, boolean]>) {
-    const spinGroup = new THREE.Group();
-    spinGroup.position.set(0, config.wheelRadius, 0);
-    const wheel = new THREE.Mesh(
-      new THREE.CylinderGeometry(config.wheelRadius, config.wheelRadius, 0.24, 12),
-      wheelMaterial,
-    );
-    wheel.rotation.z = Math.PI / 2;
-    spinGroup.add(wheel);
-
-    if (isFront) {
-      const steerGroup = new THREE.Group();
-      steerGroup.position.set(x, 0, z);
-      steerGroup.add(spinGroup);
-      frontSteerGroups.push(steerGroup);
-      meshes.push(steerGroup);
-    } else {
-      spinGroup.position.set(x, config.wheelRadius, z);
-      meshes.push(spinGroup);
-    }
-    wheelSpinGroups.push(spinGroup);
-  }
-
-  return {
-    meshes,
-    frontSteerGroups,
-    wheelSpinGroups,
-    headlightMaterials: [headlightMaterial, headlightMaterial],
-    brakeLightMaterials: [brakeLightMaterial, brakeLightMaterial],
-  };
 }
 
 type Corner = readonly [number, number];

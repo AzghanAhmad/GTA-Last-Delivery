@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import type { WorldCollision } from "./WorldCollision";
-import type { BuildingSystem } from "./BuildingSystem";
+import type { BuildingManager } from "./BuildingManager";
 import type { PropFactory } from "./Props";
 import { mat, box, solid, emissiveBox } from "./BuildKit";
 import { NeonSign } from "./NeonSign";
@@ -15,7 +15,7 @@ export class GasStation {
   constructor(
     scene: THREE.Scene,
     collision: WorldCollision,
-    buildings: BuildingSystem,
+    buildings: BuildingManager,
     props: PropFactory,
     location: WorldLocation,
   ) {
@@ -29,6 +29,7 @@ export class GasStation {
       emissiveIntensity: 1.6,
       roughness: 0.6,
     });
+    underMat.userData.nightGlow = 1.6;
 
     const canopy = box(18, 0.7, 11, canopyMat, x, 5.2, z);
     scene.add(canopy);
@@ -61,6 +62,7 @@ export class GasStation {
     }
 
     const light = new THREE.PointLight(0xfff3d6, 60, 26, 2);
+    light.userData.nightLight = 60;
     light.position.set(x, 4.6, z);
     scene.add(light);
 

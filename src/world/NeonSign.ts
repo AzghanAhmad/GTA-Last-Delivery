@@ -37,6 +37,7 @@ export class NeonSign {
       depthWrite: false,
       side: THREE.DoubleSide,
     });
+    material.userData.nightGlow = options.emissiveIntensity ?? 1.6;
 
     const mesh = new THREE.Mesh(new THREE.PlaneGeometry(options.width, options.width / aspect), material);
     return mesh;

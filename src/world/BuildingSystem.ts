@@ -114,6 +114,7 @@ export class BuildingSystem {
         roughness: 0.78,
         metalness: 0.08,
       });
+      material.userData.nightGlow = style.emissiveIntensity;
       this.facadeCache.set(key, material);
     }
     return material;

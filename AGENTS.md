@@ -58,7 +58,7 @@ No other runtime dependencies should be added without strong justification.
 ```
 src/
   core/        Game, InputManager, CameraManager, AudioManager
-  player/      Player, PlayerController, PlayerAnimation
+  player/      Player, PlayerController, PlayerModel
   vehicles/    Vehicle, VehicleController, VehicleManager
   police/      Police, PoliceAI, WantedSystem
   world/       City, Traffic, NPCManager

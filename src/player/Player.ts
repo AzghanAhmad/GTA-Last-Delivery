@@ -1,8 +1,13 @@
 import * as THREE from "three";
+import { PlayerModel } from "./PlayerModel";
 
 export enum PlayerState {
   ON_FOOT = "onFoot",
+  /** Animated walk-to-seat sequence; movement input is ignored. */
+  ENTERING_VEHICLE = "enteringVehicle",
   IN_VEHICLE = "inVehicle",
+  /** Animated seat-to-ground sequence; movement input is ignored. */
+  EXITING_VEHICLE = "exitingVehicle",
 }
 
 export interface PlayerConfig {
@@ -35,29 +40,19 @@ export const defaultPlayerConfig: PlayerConfig = {
   height: 1.85,
 };
 
-export interface PlaceholderParts {
-  legLeftPivot: THREE.Group;
-  legRightPivot: THREE.Group;
-  armLeftPivot: THREE.Group;
-  armRightPivot: THREE.Group;
-}
-
 /**
  * Player entity: transform, simple kinematics, gravity/jump and AABB collision.
  *
  * The group origin sits at the player's feet. The group is rotated to face the
  * movement direction; the camera never drives the player's facing directly.
- * The body is a temporary low-poly placeholder built from primitives that will
- * be replaced by a real character model later.
+ * All visual representation (mesh, rig, animations) lives in `PlayerModel`,
+ * so a character model can be swapped without touching movement code.
  */
 export class Player {
   readonly group: THREE.Group;
   readonly config: PlayerConfig;
-
-  readonly legLeftPivot: THREE.Group;
-  readonly legRightPivot: THREE.Group;
-  readonly armLeftPivot: THREE.Group;
-  readonly armRightPivot: THREE.Group;
+  /** Visual representation (procedural fallback rig or adopted GLTF model). */
+  readonly model: PlayerModel;
 
   readonly velocity = new THREE.Vector3();
   isGrounded = true;
@@ -73,20 +68,8 @@ export class Player {
     this.config = config;
     this.group = new THREE.Group();
 
-    const parts = buildPlaceholder();
-    this.legLeftPivot = parts.legLeftPivot;
-    this.legRightPivot = parts.legRightPivot;
-    this.armLeftPivot = parts.armLeftPivot;
-    this.armRightPivot = parts.armRightPivot;
-
-    this.group.add(
-      parts.torso,
-      parts.head,
-      this.legLeftPivot,
-      this.legRightPivot,
-      this.armLeftPivot,
-      this.armRightPivot,
-    );
+    this.model = new PlayerModel();
+    this.group.add(this.model.group);
   }
 
   setColliders(colliders: readonly THREE.Box3[]): void {
@@ -102,6 +85,7 @@ export class Player {
 
   setVisible(visible: boolean): void {
     this.group.visible = visible;
+    this.model.setVisible(visible);
   }
 
   /** Places the player at a ground position facing a given yaw and resets motion. */
@@ -147,6 +131,14 @@ export class Player {
     }
 
     this.resolveCollisions();
+
+    this.model.update(delta, {
+      moving,
+      speed: this.horizontalSpeed,
+      sprinting: this.isSprinting,
+      grounded: this.isGrounded,
+      verticalVelocity: this.velocity.y,
+    });
   }
 
   private resolveCollisions(): void {
@@ -183,65 +175,6 @@ export class Player {
       p.z + this.config.depth * 0.5,
     );
   }
-}
-
-function buildPlaceholder(): PlaceholderParts & { torso: THREE.Mesh; head: THREE.Mesh } {
-  const bodyMaterial = new THREE.MeshStandardMaterial({
-    color: 0x14c8ff,
-    emissive: 0x0a3a55,
-    roughness: 0.5,
-    metalness: 0.2,
-  });
-  const limbMaterial = new THREE.MeshStandardMaterial({
-    color: 0x0aa8e0,
-    roughness: 0.6,
-  });
-  const headMaterial = new THREE.MeshStandardMaterial({
-    color: 0xf2c99a,
-    roughness: 0.8,
-  });
-  const visorMaterial = new THREE.MeshStandardMaterial({
-    color: 0x0a1a2a,
-    emissive: 0x22e0ff,
-  });
-
-  const hipY = 0.85;
-  const shoulderY = 1.6;
-
-  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.8, 0.32), bodyMaterial);
-  torso.position.y = 1.25;
-
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.17, 16, 12), headMaterial);
-  head.position.y = 1.78;
-  const visor = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.05, 0.06), visorMaterial);
-  visor.position.set(0, 0.02, 0.15);
-  head.add(visor);
-
-  const legLeftPivot = new THREE.Group();
-  legLeftPivot.position.set(-0.18, hipY, 0);
-  const legLeft = new THREE.Mesh(new THREE.BoxGeometry(0.14, hipY, 0.16), limbMaterial);
-  legLeft.position.y = -hipY * 0.5;
-  legLeftPivot.add(legLeft);
-
-  const legRightPivot = new THREE.Group();
-  legRightPivot.position.set(0.18, hipY, 0);
-  const legRight = new THREE.Mesh(new THREE.BoxGeometry(0.14, hipY, 0.16), limbMaterial);
-  legRight.position.y = -hipY * 0.5;
-  legRightPivot.add(legRight);
-
-  const armLeftPivot = new THREE.Group();
-  armLeftPivot.position.set(-0.32, shoulderY, 0);
-  const armLeft = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.62, 0.12), limbMaterial);
-  armLeft.position.y = -0.31;
-  armLeftPivot.add(armLeft);
-
-  const armRightPivot = new THREE.Group();
-  armRightPivot.position.set(0.32, shoulderY, 0);
-  const armRight = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.62, 0.12), limbMaterial);
-  armRight.position.y = -0.31;
-  armRightPivot.add(armRight);
-
-  return { torso, head, legLeftPivot, legRightPivot, armLeftPivot, armRightPivot };
 }
 
 function approach(current: number, target: number, maxDelta: number): number {

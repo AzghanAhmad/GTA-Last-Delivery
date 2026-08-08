@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import type { WorldCollision } from "./WorldCollision";
-import type { BuildingSystem } from "./BuildingSystem";
+import type { BuildingManager } from "./BuildingManager";
 import type { PropFactory } from "./Props";
 import { mat, box, solid, emissiveBox } from "./BuildKit";
 import { NeonSign } from "./NeonSign";
@@ -18,7 +18,7 @@ export class Landmark {
   constructor(
     scene: THREE.Scene,
     collision: WorldCollision,
-    buildings: BuildingSystem,
+    buildings: BuildingManager,
     props: PropFactory,
     location: WorldLocation,
   ) {
@@ -48,6 +48,7 @@ export class Landmark {
       emissiveIntensity: 2,
       roughness: 0.4,
     });
+    crownMat.userData.nightGlow = 2;
     for (const [cy, cw] of [
       [29, 4.6],
       [40, 3.0],
@@ -62,6 +63,7 @@ export class Landmark {
     scene.add(beacon);
 
     const light = new THREE.PointLight(0x1ee6ff, 120, 60, 2);
+    light.userData.nightLight = 120;
     light.position.set(x, 40, z);
     scene.add(light);
 
